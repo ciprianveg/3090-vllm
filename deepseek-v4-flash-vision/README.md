@@ -16,8 +16,26 @@ First documented run of this model on SM86 (RTX 3090) hardware.
 | Spec acceptance (code/text) | 76–87%, mean 3.3–3.5 of 4 tokens/step |
 | Max context — no CPU offload | **1,000,000 tokens** (single request) |
 | Max context — 36 GB CPU offload | 500K x **2 concurrent** GPU-resident + ~4.16M tokens parked in RAM |
-| Vision | 1 image per prompt, verified |
+| Vision (image input) | **Only without DSpark** — see [Vision](#vision) below |
 | Tool calls (OpenAI-compatible) | **Working** — see [the fixes](#the-fixes) below |
+
+## Vision
+
+Image inputs work **only on configurations without speculative decoding** (verified:
+correct object/shape/color descriptions). With DSpark enabled, multimodal +
+speculative drafting is broken **upstream in vLLM itself** (open issues
+[#38551](https://github.com/vllm-project/vllm/issues/38551),
+[#43832](https://github.com/vllm-project/vllm/issues/43832)):
+image requests crash the engine with async scheduling, and silently corrupt the
+speculation state without it. The start scripts therefore ship with
+`--limit-mm-per-prompt '{"image":0,"video":0}'` — image requests get a clean
+HTTP 400 instead of killing the server.
+
+For vision workloads, remove the `--speculative-config` argument and set
+`{"image":1,"video":0}`; decode speed drops from ~58-60 to ~25 tok/s but image
+input works flawlessly. This repo's `patches/dspark_speculator.py` additionally
+implements upstream PR #33437 semantics for DSpark (text-only drafting), which
+prevents the engine-crash class but does not yet make vision + DSpark stable.
 
 ## Two start scripts
 

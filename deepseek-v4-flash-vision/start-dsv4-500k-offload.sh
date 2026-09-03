@@ -36,6 +36,7 @@ start() {
       -v "${MODEL_PATH}:/models/DeepSeek-V4-Flash-Vision-Exp:ro" \
       -v "${SCRIPT_DIR}/patches/model.py:/usr/local/lib/python3.12/dist-packages/vllm/models/deepseek_v4/nvidia/model.py:ro" \
       -v "${SCRIPT_DIR}/patches/scheduler.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/core/sched/scheduler.py:ro" \
+      -v "${SCRIPT_DIR}/patches/dspark_speculator.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu/spec_decode/dspark/speculator.py:ro" \
       -v "${SCRIPT_DIR}/patches/structured_output_init.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/structured_output/__init__.py:ro" \
       -e HF_HOME=/tmp/hf_cache \
       -e CUDA_DEVICE_ORDER=PCI_BUS_ID \
@@ -59,7 +60,7 @@ start() {
         --gpu-memory-utilization 0.955 \
         --max-model-len 500000 --kv-cache-memory 2147483648 \
         --kv-offloading-size "$KV_OFFLOAD_GB" \
-        --max-num-batched-tokens 1024 --limit-mm-per-prompt '{"image":1,"video":0}' \
+        --max-num-batched-tokens 1024 --limit-mm-per-prompt '{"image":0,"video":0}' \
         --max-num-seqs 4 \
         --speculative-config '{"method":"dspark","num_speculative_tokens":3,"draft_sample_method":"probabilistic","enable_adaptive_verification":false}' \
         --kv-cache-dtype fp8_ds_mla \
