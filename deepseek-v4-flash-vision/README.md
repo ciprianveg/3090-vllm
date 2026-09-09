@@ -13,6 +13,7 @@ First documented run of this model on SM86 (RTX 3090) hardware.
 | Prefill (long-context, cold) | **~3,500 tok/s** (425K tokens in ~120s) |
 | Prefill (3 concurrent 470K requests) | 3,400 tok/s aggregate (~95% scaling) |
 | Decode, DSpark speculative (k=3) | **58–60 tok/s** warm, 2.4x vs no-spec (25 tok/s) |
+| Decode, DSpark (TP4×PP3, 12 GPUs) | **120+ tok/s** — same image, 12-GPU config |
 | Spec acceptance (code/text) | 76–87%, mean 3.3–3.5 of 4 tokens/step |
 | Max context — no CPU offload | **1,000,000 tokens** (single request) |
 | Max context — 36 GB CPU offload | 500K x **2 concurrent** GPU-resident + ~4.16M tokens parked in RAM |
@@ -85,7 +86,7 @@ this stack sits at ~4.2 GB per worker rank (10 ranks); 40+ GB fails pinning mid-
 
 | | |
 |---|---|
-| GPU | 12x NVIDIA RTX 3090 24 GB (Ampere, SM86) — **10 used** (TP=2, PP=5), 2 spare |
+| GPU | 12x NVIDIA RTX 3090 24 GB (Ampere, SM86) — TP2×PP5 uses **10** (2 spare); TP4×PP3 uses **all 12** |
 | RAM | 251 GB (36 GB pinned for KV offload in variant 3) |
 | Disk | 7 TB (model weights: 185 GB) |
 | Power | 250 W/GPU limit recommended (stock 220 W is fine) |
@@ -133,6 +134,8 @@ broken (see `SPEC_VISION_FIX.md`). With them, spec decode + tool calls + vision 
 - **58–60 tok/s decode** is the warm single-stream text number with DSpark
   acceptance in the 80%+ range; first request after boot runs ~45 tok/s until
   caches warm.
+- **120+ tok/s** on the same image with **TP4×PP3 across all 12 GPUs** (vs the
+  TP2×PP5 10-GPU config above).
 - **Vision decode** is ~40–44 tok/s (1 image) and ~44 tok/s (3 images in one
   prompt) with DSpark k=3 — the text-only draft drafts the image-conditioned text
   rows, which are in-distribution.
