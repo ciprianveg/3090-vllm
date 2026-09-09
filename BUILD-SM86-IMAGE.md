@@ -1,12 +1,11 @@
 # Building the SM86 (RTX 3090) vLLM image
 
-The DeepSeek-V4-Flash-Vision image is a stock vLLM build from the
-[ciprianveg/vllm-backport-3090](https://github.com/ciprianveg/vllm-backport-3090)
-fork — a pinned, reproducible snapshot of [wtdcode/vllm-backport](https://github.com/wtdcode/vllm-backport)
-PR #58 (`pr/vision-sm80`) with the two build-time fixes baked in
+The DeepSeek-V4-Flash-Vision image is a stock vLLM build from
+[wtdcode/vllm-backport](https://github.com/wtdcode/vllm-backport) PR #58
+(`pr/vision-sm80`), compiled for Ampere (SM86). The two build-time fixes
 (transition repair in the scheduler, grammar-bitmask validation in structured
-output). It is compiled for Ampere (SM86). The remaining runtime patches in
-[`deepseek-v4-flash-vision/patches/`](deepseek-v4-flash-vision/patches/) are
+output) are applied to the source before building. The remaining runtime patches
+in [`deepseek-v4-flash-vision/patches/`](deepseek-v4-flash-vision/patches/) are
 **not baked in** — they are bind-mounted at container start (see
 `start-dsv4-1m.sh`). This guide covers building and publishing the base image.
 
@@ -20,11 +19,16 @@ output). It is compiled for Ampere (SM86). The remaining runtime patches in
 ## Build
 
 ```bash
-# 1. Clone the reproducible backport fork
-git clone https://github.com/ciprianveg/vllm-backport-3090.git
-cd vllm-backport-3090
+# 1. Clone the backport fork and check out PR #58
+git clone https://github.com/wtdcode/vllm-backport.git
+cd vllm-backport
+git fetch origin pull/58/head:pr58
+git checkout pr58
 
-# 2. Build with the repo's Dockerfile, targeting Ampere (sm86)
+# 2. Apply the two build-time fixes (transition repair + grammar bitmask) —
+#    see deepseek-v4-flash-vision/patches/scheduler.py and structured_output_init.py
+
+# 3. Build with the repo's Dockerfile, targeting Ampere (sm86)
 docker build \
   -f docker/Dockerfile \
   --build-arg TORCH_CUDA_ARCH_LIST=8.6 \

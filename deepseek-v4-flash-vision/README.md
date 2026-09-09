@@ -82,9 +82,8 @@ the top if your paths differ).
 - **Weights:** `DeepSeek-V4-Flash-Vision-Exp` (185 GB, 48 shards + fused DSpark MTP
   draft layers, `n_predict=3`)
 - **Image:** `ghcr.io/ciprianveg/3090-vllm:dsv4-flash-vision-sm86` — built from
-  [ciprianveg/vllm-backport-3090](https://github.com/ciprianveg/vllm-backport-3090)
-  (a pinned snapshot of [wtdcode/vllm-backport PR #58](https://github.com/wtdcode/vllm-backport/pull/58)
-  `pr/vision-sm80`), with `TORCH_CUDA_ARCH_LIST=8.6`, PyTorch 2.11 + cu130
+  [wtdcode/vllm-backport PR #58](https://github.com/wtdcode/vllm-backport/pull/58)
+  (`pr/vision-sm80`), with `TORCH_CUDA_ARCH_LIST=8.6`, PyTorch 2.11 + cu130
 - **Serving stack facts:** Marlin W4A16 FP4→BF16 dequant for MoE experts on Ampere,
   Triton MLA sparse attention with software FP8, TileLang hyperconnections
 - **Computed context:** the no-offload variant is configured with
@@ -95,9 +94,8 @@ the top if your paths differ).
 ## Mods & fixes
 
 **This is not just the upstream PR #58 image.** The image is built from
-[ciprianveg/vllm-backport-3090](https://github.com/ciprianveg/vllm-backport-3090)
-(a pinned snapshot of [wtdcode/vllm-backport PR #58](https://github.com/wtdcode/vllm-backport/pull/58)
-`pr/vision-sm80`), but the working spec + vision + tool-call setup requires our
+[wtdcode/vllm-backport PR #58](https://github.com/wtdcode/vllm-backport/pull/58)
+(`pr/vision-sm80`), but the working spec + vision + tool-call setup requires our
 own runtime patches **and** launch-config mods on top. Everything below is what we
 changed beyond the stock upstream PR image.
 
