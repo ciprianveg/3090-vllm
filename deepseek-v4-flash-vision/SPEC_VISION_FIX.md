@@ -69,7 +69,8 @@ and request orders (0 NaN traces, all text requests complete 1500/1500 tokens).
    Changed to `0,1,2,3,4,5,6,7,10,11` (line 42).
 2. **Align to the 2×5 baseline config** (only real difference from baseline = the
    DSpark spec config + images enabled):
-   - `--max-model-len` 500000 → **409600**
+   - `--max-model-len` 500000 → **409600** (later restored to **500000** in the
+     repo's `start-dsv4-spec.sh`; 1M is available for 2 users via `start-dsv4-1m.sh`)
    - `--max-num-batched-tokens` 1024 → **2048**
    - removed `--kv-offloading-size 36`, `--enforce-eager`, `-O0`, `--no-async-scheduling`
    - `cudagraph_capture_sizes` → `[1,2,4]`, `max_cudagraph_capture_size` → 4

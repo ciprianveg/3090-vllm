@@ -45,11 +45,13 @@ is all you need (modify the env defaults at the top if your paths differ).
 ./start-dsv4-spec.sh start
 ```
 
-- `--max-model-len 409600`, TP=2 PP=5 on 10 GPUs, `--max-num-seqs 4`
+- `--max-model-len 500000`, TP=2 PP=5 on 10 GPUs, `--max-num-seqs 4`
 - DSpark k=3 (`num_speculative_tokens: 3`), vision enabled
 - Aligned to the proven 2x5 baseline config (no `--enforce-eager`/`-O0`/offload)
 - **The working configuration**: spec + vision + tool calls together
   (text ~32–55 tok/s, vision 1-image ~40–44 tok/s, 3-image ~44 tok/s)
+- **1M context is available for 2 users** via `start-dsv4-1m.sh` (no offload) —
+  two ~450–500K requests share the 1.01M-token GPU KV pool
 
 ### 2. `start-dsv4-1m.sh` — 1M context, no CPU offload
 
@@ -97,8 +99,10 @@ this stack sits at ~4.2 GB per worker rank (10 ranks); 40+ GB fails pinning mid-
   (`pr/vision-sm80`), with `TORCH_CUDA_ARCH_LIST=8.6`, PyTorch 2.11 + cu130
 - **Serving stack facts:** Marlin W4A16 FP4→BF16 dequant for MoE experts on Ampere,
   Triton MLA sparse attention with software FP8, TileLang hyperconnections
-- **Computed context (from boot logs):** `max_model_len=409600`, GPU KV cache
-  **560,058 tokens**, max concurrency for 409,600-token requests = **1.37x**
+- **Computed context:** the spec variant is configured with `max_model_len=500000`
+  (500K); the GPU KV pool is sized by the explicit 2 GiB `--kv-cache-memory` cap.
+  The full 1M model context (`max_position_embeddings=1,048,576`) is available via
+  `start-dsv4-1m.sh` — two ~450–500K requests share the 1.01M-token pool.
 
 ## The fixes
 

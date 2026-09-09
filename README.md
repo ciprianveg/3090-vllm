@@ -10,7 +10,7 @@ runtime patches that make frontier-class models actually run on the hardware.
 
 | Model | Subtree | Highlights |
 |-------|---------|------------|
-| **DeepSeek-V4-Flash-Vision-Exp** (285B MoE, vision) | [deepseek-v4-flash-vision](deepseek-v4-flash-vision/) | **1M context (no offload) / 500K x2 (36 GB RAM offload)** · DSpark speculative decoding 58–60 tok/s · **vision + spec working** (~40–44 tok/s) · ~3,500 tok/s prefill · tool calls fixed and working |
+| **DeepSeek-V4-Flash-Vision-Exp** (285B MoE, vision) | [deepseek-v4-flash-vision](deepseek-v4-flash-vision/) | **500K context (spec+vision)** · **1M available for 2 users** (`start-dsv4-1m.sh`) · DSpark speculative decoding 58–60 tok/s · **vision + spec working** (~40–44 tok/s) · ~3,500 tok/s prefill · tool calls fixed and working |
 
 ## Hardware target
 

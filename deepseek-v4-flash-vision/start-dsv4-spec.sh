@@ -61,7 +61,7 @@ start() {
         --tensor-parallel-size 2 \
         --pipeline-parallel-size 5 \
         --gpu-memory-utilization 0.95 \
-        --max-model-len 409600 \
+        --max-model-len 500000 \
         --kv-cache-memory 2147483648 \
         --max-num-batched-tokens 2048 \
         --limit-mm-per-prompt '{"video":0}' \
