@@ -1,8 +1,11 @@
 # Building the SM86 (RTX 3090) vLLM image
 
 The DeepSeek-V4-Flash-Vision image is a stock vLLM build from the
-[wtdcode/vllm-backport](https://github.com/wtdcode/vllm-backport) fork
-(PR #58 `pr/vision-sm80`), compiled for Ampere (SM86). The runtime patches in
+[ciprianveg/vllm-backport-3090](https://github.com/ciprianveg/vllm-backport-3090)
+fork — a pinned, reproducible snapshot of [wtdcode/vllm-backport](https://github.com/wtdcode/vllm-backport)
+PR #58 (`pr/vision-sm80`) with the two build-time fixes baked in
+(transition repair in the scheduler, grammar-bitmask validation in structured
+output). It is compiled for Ampere (SM86). The remaining runtime patches in
 [`deepseek-v4-flash-vision/patches/`](deepseek-v4-flash-vision/patches/) are
 **not baked in** — they are bind-mounted at container start (see
 `start-dsv4-spec.sh`). This guide covers building and publishing the base image.
@@ -17,11 +20,9 @@ The DeepSeek-V4-Flash-Vision image is a stock vLLM build from the
 ## Build
 
 ```bash
-# 1. Clone the backport fork and check out PR #58
-git clone https://github.com/wtdcode/vllm-backport.git
-cd vllm-backport
-git fetch origin pull/58/head:pr58
-git checkout pr58
+# 1. Clone the reproducible backport fork
+git clone https://github.com/ciprianveg/vllm-backport-3090.git
+cd vllm-backport-3090
 
 # 2. Build with the repo's Dockerfile, targeting Ampere (sm86)
 docker build \

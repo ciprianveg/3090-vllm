@@ -95,8 +95,9 @@ this stack sits at ~4.2 GB per worker rank (10 ranks); 40+ GB fails pinning mid-
 - **Weights:** `DeepSeek-V4-Flash-Vision-Exp` (185 GB, 48 shards + fused DSpark MTP
   draft layers, `n_predict=3`)
 - **Image:** `ghcr.io/ciprianveg/3090-vllm:dsv4-flash-vision-sm86` — built from
-  [wtdcode/vllm-backport PR #58](https://github.com/wtdcode/vllm-backport/pull/58)
-  (`pr/vision-sm80`), with `TORCH_CUDA_ARCH_LIST=8.6`, PyTorch 2.11 + cu130
+  [ciprianveg/vllm-backport-3090](https://github.com/ciprianveg/vllm-backport-3090)
+  (a pinned snapshot of [wtdcode/vllm-backport PR #58](https://github.com/wtdcode/vllm-backport/pull/58)
+  `pr/vision-sm80`), with `TORCH_CUDA_ARCH_LIST=8.6`, PyTorch 2.11 + cu130
 - **Serving stack facts:** Marlin W4A16 FP4→BF16 dequant for MoE experts on Ampere,
   Triton MLA sparse attention with software FP8, TileLang hyperconnections
 - **Computed context:** the spec variant is configured with `max_model_len=500000`
@@ -104,9 +105,19 @@ this stack sits at ~4.2 GB per worker rank (10 ranks); 40+ GB fails pinning mid-
   The full 1M model context (`max_position_embeddings=1,048,576`) is available via
   `start-dsv4-1m.sh` — two ~450–500K requests share the 1.01M-token pool.
 
-## The fixes
+## Mods & fixes
 
-Runtime patches (bind-mounted, in [`patches/`](patches/)) are **required**:
+**This is not just the upstream PR #58 image.** The image is built from
+[ciprianveg/vllm-backport-3090](https://github.com/ciprianveg/vllm-backport-3090)
+(a pinned snapshot of [wtdcode/vllm-backport PR #58](https://github.com/wtdcode/vllm-backport/pull/58)
+`pr/vision-sm80`), but the working spec + vision + tool-call setup requires our
+own runtime patches **and** launch-config mods on top. Everything below is what we
+changed beyond the stock upstream PR image.
+
+### Runtime patches (bind-mounted, in [`patches/`](patches/))
+
+All are bind-mounted at container start (`start-dsv4-spec.sh`); none are baked into
+the image.
 
 | Patch | What it does |
 |---|---|
@@ -118,6 +129,23 @@ Runtime patches (bind-mounted, in [`patches/`](patches/)) are **required**:
 | `patches/vision.py` | Routes large-image ViT attention through FlashInfer instead of the O(S²) SDPA math backend (OOM fix for ~4k ViT patches) |
 | `patches/flashinfer_sparse.py` | Keys the FlashInfer sparse workspace by `(device, workspace lane)` so the draft (DSpark) and target never share one 128 MB scratch buffer (draft CUDA-graph replay vs target aux-stream race) |
 | `patches/block_table.py` | Zeroes the stale tail of a reused block-table row on overwrite, so a new request doesn't inherit the previous occupant's block ids (image-flavored KV after an mm request) |
+
+### Launch-config mods (`start-dsv4-spec.sh`)
+
+| Mod | Value | Why |
+|---|---|---|
+| GPUs | `CUDA_VISIBLE_DEVICES=0-7,10,11` | GPUs 8/9 are reserved for another model on this box |
+| Parallelism | TP2 × PP5 (10 GPUs) | weight-balanced; last rank carries the DSpark draft (~5.5 GB) + embed + lm_head |
+| Layer partition | `VLLM_PP_LAYER_PARTITION=10,9,9,9,6` | not layer-balanced but **weight**-balanced |
+| Context | `--max-model-len 500000` | 500K; 1M available for 2 users via `start-dsv4-1m.sh` |
+| KV cache | `--kv-cache-memory 2147483648` (2 GiB cap), `--kv-cache-dtype fp8_ds_mla` | explicit cap prevents warmup OOM on 24 GB cards |
+| Spec | `--speculative-config '{"method":"dspark","num_speculative_tokens":3,...}'` | DSpark k=3 (measured winner; k=6 loses) |
+| Vision | `--limit-mm-per-prompt '{"video":0}'` | images unlimited, video disabled |
+| Batch | `--max-num-batched-tokens 2048` | keeps Triton warmup within margin |
+| CUDA graphs | `cudagraph_mode=PIECEWISE`, sizes `[1,2,4]`, max 4 | |
+| Indexer | `VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=64` | caps indexer logits buffers |
+| FlashInfer | `VLLM_FLASHINFER_AUTOTUNE_SKIP_OPS="trtllm_fp4_block_scale_moe,..."` | skip autotune on unsupported ops |
+| NCCL | `NCCL_ALGO=Ring`, `NCCL_PROTO=Simple`, `NCCL_P2P_DISABLE=1`, `NCCL_ASYNC_ERROR_HANDLING=1` | PCIe-only multi-GPU (no NVLink on 3090s) |
 
 Without these, DSpark + tool-call grammars is broken upstream
 ([#49002](https://github.com/vllm-project/vllm/issues/49002),
