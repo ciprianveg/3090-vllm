@@ -150,9 +150,6 @@ broken (see `SPEC_VISION_FIX.md`). With them, spec decode + tool calls + vision 
   uncapped); first request after boot runs ~45 tok/s until caches warm.
 - **120+ tok/s** on the same image with **TP4×PP3 across all 12 GPUs** (vs the
   TP2×PP5 10-GPU config above).
-- Decode throughput is memory-bandwidth-bound: aggregate stays ~60 tok/s whether
-  1 or 4 users generate (each user gets 1/n of it). Two users is the sweet spot.
-- GPU 11 historically flaky on this box — the config pins `CUDA_VISIBLE_DEVICES=0-7,10,11`.
 
 ## Quickstart
 
