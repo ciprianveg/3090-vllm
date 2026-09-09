@@ -2,22 +2,26 @@
 set -euo pipefail
 
 # DeepSeek-V4-Flash-Vision-Exp — 12x RTX 3090, TP=2 PP=5 (10 GPUs)
-# Variant: DSpark speculative decoding + vision, aligned to the proven 2x5
-# baseline config. This is the primary working configuration (see
-# SPEC_VISION_FIX.md): spec + image input both work, DSpark k=3.
+# Variant: DSpark speculative decoding + vision, 4,000,000-token context with
+# CPU KV offload. The GPU holds a working set; computed KV beyond it is parked
+# in pinned RAM so long-document re-queries reload from RAM instead of
+# re-prefilling.
 #
-# Requires: the vllm-backport PR#58 sm86 image (ghcr.io/ciprianveg/3090-vllm:dsv4-flash-vision-sm86)
+# Requires: the reproducible sm86 image (ghcr.io/ciprianveg/3090-vllm:dsv4-flash-vision-sm86)
 # and the model weights locally (see README).
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 MODEL_PATH="${MODEL_PATH:-/mnt/data7tb/models/DeepSeek-V4-Flash-Vision-Exp}"
 IMAGE="${IMAGE:-ghcr.io/ciprianveg/3090-vllm:dsv4-flash-vision-sm86}"
-CONTAINER_NAME="vllm_dsv4_spec"
+CONTAINER_NAME="vllm_dsv4_4m_offload"
 PORT="${PORT:-8000}"
 # Set VLLM_API_KEY in your environment (or edit this default) to secure the API.
 API_KEY="${VLLM_API_KEY:-}"
 # GPUs 8/9 are reserved for another model on this box; use the rest.
 GPUS="${GPUS:-0,1,2,3,4,5,6,7,10,11}"
+# Pinned RAM for KV offload. Don't raise past ~38 GB: the cudaHostRegister
+# pinning wall on this stack sits at ~4.2 GB per worker rank (10 ranks).
+KV_OFFLOAD_GB="${KV_OFFLOAD_GB:-36}"
 
 start() {
     echo "Starting $CONTAINER_NAME ..."
@@ -61,8 +65,9 @@ start() {
         --tensor-parallel-size 2 \
         --pipeline-parallel-size 5 \
         --gpu-memory-utilization 0.95 \
-        --max-model-len 500000 \
+        --max-model-len 4000000 \
         --kv-cache-memory 2147483648 \
+        --kv-offloading-size "$KV_OFFLOAD_GB" \
         --max-num-batched-tokens 2048 \
         --limit-mm-per-prompt '{"video":0}' \
         --max-num-seqs 4 \
@@ -78,7 +83,7 @@ start() {
         --host 0.0.0.0 \
         --port "$PORT" \
         --api-key "$API_KEY"
-    echo "Container started. Tail logs with: $0 logs"
+    echo "Container started. Tail logs with: $0 logs  (boot takes ~9 minutes)"
 }
 
 stop() {
@@ -88,21 +93,21 @@ stop() {
     echo "Stopped."
 }
 
-logs() {
-    docker logs -f "$CONTAINER_NAME" "$@" 2>&1 | sed -u -E 's/(Avg generation throughput:[[:space:]]*)([0-9.]+[[:space:]]*tokens\/s)/\1\x1b[1;32m\2\x1b[0m/g'
-}
-
-status() {
+logs()      { docker logs -f "$CONTAINER_NAME"; }
+status()    {
     docker ps -a --format "{{.Names}}\t{{.Status}}" | grep "$CONTAINER_NAME" || echo "no container"
     curl -s -o /dev/null -w "API: HTTP %{http_code}\n" --connect-timeout 3 \
       "http://localhost:${PORT}/v1/models" -H "Authorization: Bearer ${API_KEY}" || true
 }
+restart()   { stop; start; }
 
 case "${1:-}" in
-    start)  start ;;
-    stop)   stop ;;
-    logs)   logs ;;
-    status) status ;;
-    restart) stop; start ;;
-    *) echo "Usage: $0 {start|stop|logs|status|restart}"; exit 1 ;;
+    start)   start ;;
+    stop)    stop ;;
+    logs)    logs ;;
+    status)  status ;;
+    restart) restart ;;
+    *) echo "Usage: $0 {start|stop|logs|status|restart}"
+       echo "Env: MODEL_PATH, IMAGE, PORT, API_KEY, GPUS, KV_OFFLOAD_GB"
+       exit 1 ;;
 esac

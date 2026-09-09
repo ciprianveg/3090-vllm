@@ -16,7 +16,7 @@ First documented run of this model on SM86 (RTX 3090) hardware.
 | Decode, DSpark (TP4×PP3, 12 GPUs) | **120+ tok/s** — same image, 12-GPU config |
 | Spec acceptance (code/text) | 76–87%, mean 3.3–3.5 of 4 tokens/step |
 | Max context — no CPU offload | **1,000,000 tokens** (single request) |
-| Max context — 36 GB CPU offload | 500K x **2 concurrent** GPU-resident + ~4.16M tokens parked in RAM |
+| Max context — RAM offload | **4,000,000 tokens** (computed KV parked in pinned RAM) |
 | Vision (image input) | **Working with DSpark (k=3)** — see [Vision](#vision) below |
 | Tool calls (OpenAI-compatible) | **Working** — see [the fixes](#the-fixes) below |
 
@@ -35,58 +35,45 @@ ship with `--limit-mm-per-prompt '{"video":0}'` (images unlimited, video disable
 
 ## Start scripts
 
-All scripts share the same image and patches; they differ in context/offload
-placement and whether DSpark is enabled. They are standalone — `./script start`
-is all you need (modify the env defaults at the top if your paths differ).
+Both scripts share the same image, patches, and engine tuning (DSpark k=3 + vision
+enabled); they differ only in context size and whether CPU KV offload is used.
+They are standalone — `./script start` is all you need (modify the env defaults at
+the top if your paths differ).
 
-### 1. `start-dsv4-spec.sh` — DSpark speculation + vision (primary)
-
-```bash
-./start-dsv4-spec.sh start
-```
-
-- `--max-model-len 500000`, TP=2 PP=5 on 10 GPUs, `--max-num-seqs 4`
-- DSpark k=3 (`num_speculative_tokens: 3`), vision enabled
-- Aligned to the proven 2x5 baseline config (no `--enforce-eager`/`-O0`/offload)
-- **The working configuration**: spec + vision + tool calls together
-  (text ~60+ tok/s at 240 W cap, ~70+ uncapped)
-- **1M context is available for 2 users** via `start-dsv4-1m.sh` (no offload) —
-  two ~450–500K requests share the 1.01M-token GPU KV pool
-
-### 2. `start-dsv4-1m.sh` — 1M context, no CPU offload
+### 1. `start-dsv4-1m.sh` — 1M context, no CPU offload
 
 ```bash
 ./start-dsv4-1m.sh start
 ```
 
-- `--max-model-len 1000000`, KV pool **1,010,835 tokens** (2 GiB explicit cap)
-- A single request up to 1M tokens fits entirely in GPU memory
-- Multiple smaller requests share the same pool (e.g. 2x 450K)
+- `--max-model-len 1000000`, TP=2 PP=5 on 10 GPUs, `--max-num-seqs 4`
+- DSpark k=3 (`num_speculative_tokens: 3`), vision enabled
+- A single request up to 1M tokens fits entirely in the GPU KV pool
+  (2 GiB explicit cap); multiple smaller requests share the pool (e.g. 2x 450K)
+- **The working configuration**: spec + vision + tool calls together
+  (text ~60+ tok/s at 240 W cap, ~70+ uncapped)
 
-### 3. `start-dsv4-500k-offload.sh` — 500K context x 2 users, 36 GB RAM offload
+### 2. `start-dsv4-4m-offload.sh` — 4M context with CPU KV offload
 
 ```bash
-./start-dsv4-500k-offload.sh start
+./start-dsv4-4m-offload.sh start
 ```
 
-- `--max-model-len 500000` + `--kv-offloading-size 36`
-- **2x 500K requests fully GPU-resident concurrently** — both decode at full
-  speculative speed with zero stalls
-- ~**4.16M additional tokens** of computed KV parked in pinned RAM: re-querying the
-  same long document reloads from RAM instead of re-prefilling (a 500K prefill
+- `--max-model-len 4000000` + `--kv-offloading-size 36` (configurable via
+  `KV_OFFLOAD_GB`)
+- Computed KV beyond the GPU working set is parked in pinned RAM: re-querying the
+  same long document reloads from RAM instead of re-prefilling (a long prefill
   costs ~150s; an offload reload is <1s)
-- Verified: 3x 470K concurrent requests (1.41M live KV — 140% of GPU pool) all
-  answered correctly, throughput within ~7% of single-stream
-
-**Don't raise the offload size past ~38 GB.** The `cudaHostRegister` pinning wall on
-this stack sits at ~4.2 GB per worker rank (10 ranks); 40+ GB fails pinning mid-boot.
+- **Don't raise `KV_OFFLOAD_GB` past ~38 GB.** The `cudaHostRegister` pinning wall
+  on this stack sits at ~4.2 GB per worker rank (10 ranks); 40+ GB fails pinning
+  mid-boot.
 
 ## Hardware
 
 | | |
 |---|---|
 | GPU | 12x NVIDIA RTX 3090 24 GB (Ampere, SM86) — TP2×PP5 uses **10** (2 spare); TP4×PP3 uses **all 12** |
-| RAM | 251 GB (36 GB pinned for KV offload in variant 3) |
+| RAM | 251 GB (36 GB pinned for KV offload in the 4M variant) |
 | Disk | 7 TB (model weights: 185 GB) |
 | Power | 250 W/GPU limit recommended (stock 220 W is fine) |
 
@@ -100,10 +87,10 @@ this stack sits at ~4.2 GB per worker rank (10 ranks); 40+ GB fails pinning mid-
   `pr/vision-sm80`), with `TORCH_CUDA_ARCH_LIST=8.6`, PyTorch 2.11 + cu130
 - **Serving stack facts:** Marlin W4A16 FP4→BF16 dequant for MoE experts on Ampere,
   Triton MLA sparse attention with software FP8, TileLang hyperconnections
-- **Computed context:** the spec variant is configured with `max_model_len=500000`
-  (500K); the GPU KV pool is sized by the explicit 2 GiB `--kv-cache-memory` cap.
-  The full 1M model context (`max_position_embeddings=1,048,576`) is available via
-  `start-dsv4-1m.sh` — two ~450–500K requests share the 1.01M-token pool.
+- **Computed context:** the no-offload variant is configured with
+  `max_model_len=1000000` (1M, the model's native YaRN-extended limit); the
+  offload variant uses `max_model_len=4000000` (4M) with CPU KV offload. The GPU
+  KV pool is sized by the explicit 2 GiB `--kv-cache-memory` cap.
 
 ## Mods & fixes
 
@@ -116,7 +103,7 @@ changed beyond the stock upstream PR image.
 
 ### Runtime patches (bind-mounted, in [`patches/`](patches/))
 
-All are bind-mounted at container start (`start-dsv4-spec.sh`); none are baked into
+All are bind-mounted at container start (`start-dsv4-1m.sh`); none are baked into
 the image.
 
 | Patch | What it does |
@@ -130,14 +117,14 @@ the image.
 | `patches/flashinfer_sparse.py` | Keys the FlashInfer sparse workspace by `(device, workspace lane)` so the draft (DSpark) and target never share one 128 MB scratch buffer (draft CUDA-graph replay vs target aux-stream race) |
 | `patches/block_table.py` | Zeroes the stale tail of a reused block-table row on overwrite, so a new request doesn't inherit the previous occupant's block ids (image-flavored KV after an mm request) |
 
-### Launch-config mods (`start-dsv4-spec.sh`)
+### Launch-config mods (`start-dsv4-1m.sh` / `start-dsv4-4m-offload.sh`)
 
 | Mod | Value | Why |
 |---|---|---|
 | GPUs | `CUDA_VISIBLE_DEVICES=0-7,10,11` | GPUs 8/9 are reserved for another model on this box |
 | Parallelism | TP2 × PP5 (10 GPUs) | weight-balanced; last rank carries the DSpark draft (~5.5 GB) + embed + lm_head |
 | Layer partition | `VLLM_PP_LAYER_PARTITION=10,9,9,9,6` | not layer-balanced but **weight**-balanced |
-| Context | `--max-model-len 500000` | 500K; 1M available for 2 users via `start-dsv4-1m.sh` |
+| Context | 1M (`start-dsv4-1m.sh`, no offload) / 4M (`start-dsv4-4m-offload.sh`, RAM offload) | model native YaRN limit is 1M; 4M uses offload |
 | KV cache | `--kv-cache-memory 2147483648` (2 GiB cap), `--kv-cache-dtype fp8_ds_mla` | explicit cap prevents warmup OOM on 24 GB cards |
 | Spec | `--speculative-config '{"method":"dspark","num_speculative_tokens":3,...}'` | DSpark k=3 (measured winner; k=6 loses) |
 | Vision | `--limit-mm-per-prompt '{"video":0}'` | images unlimited, video disabled |
@@ -151,7 +138,7 @@ Without these, DSpark + tool-call grammars is broken upstream
 ([#49002](https://github.com/vllm-project/vllm/issues/49002),
 [#49210](https://github.com/vllm-project/vllm/issues/49210)) and vision + spec is
 broken (see `SPEC_VISION_FIX.md`). With them, spec decode + tool calls + vision +
-500K context run together, stable through hours of agent traffic.
+1M context run together, stable through hours of agent traffic.
 
 ## Performance notes
 
@@ -173,16 +160,13 @@ broken (see `SPEC_VISION_FIX.md`). With them, spec decode + tool calls + vision 
 # weights
 huggingface-cli download deepseek-ai/DeepSeek-V4-Flash-Vision-Exp --local-dir /mnt/data7tb/models/DeepSeek-V4-Flash-Vision-Exp
 
-# run — primary spec+vision variant (set VLLM_API_KEY for a secured API)
+# run (set VLLM_API_KEY for a secured API)
 export VLLM_API_KEY="<your-key>"
-./start-dsv4-spec.sh start
-
-# alternatives
-./start-dsv4-1m.sh start          # 1M ctx, no offload
-./start-dsv4-500k-offload.sh start  # 500K ctx x2, 36 GB offload
+./start-dsv4-1m.sh start            # 1M ctx, no offload
+./start-dsv4-4m-offload.sh start    # 4M ctx, RAM offload
 
 # manage
-./start-dsv4-spec.sh status | logs | stop | restart
+./start-dsv4-1m.sh status | logs | stop | restart
 ```
 
 Boot takes ~9 minutes. Watch for `GPU KV cache size`, and
@@ -205,4 +189,4 @@ curl http://localhost:8000/v1/chat/completions \
 - `--num-speculative-tokens` must be a multiple of the draft's `n_predict=3` (k=3 or 6).
   k=3 is the measured winner; k=6 loses (low acceptance, high verify cost).
 - `VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=64` caps indexer logits buffers.
-- `--max-num-batched-tokens 2048` (spec variant) keeps Triton warmup within margin.
+- `--max-num-batched-tokens 2048` (1M/4M variants) keeps Triton warmup within margin.

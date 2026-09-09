@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # DeepSeek-V4-Flash-Vision-Exp — 12x RTX 3090, TP=2 PP=5 (10 GPUs)
-# Variant: 1,000,000-token context, no CPU KV offload.
-# Single request up to 1M tokens fits the 1.01M-token GPU KV pool.
+# Variant: DSpark speculative decoding + vision, 1,000,000-token context, no CPU
+# KV offload. A single request up to 1M tokens fits the 1.01M-token GPU KV pool.
 #
-# Requires: the vllm-backport PR#58 sm86 image (ghcr.io/ciprianveg/3090-vllm:dsv4-flash-vision-sm86)
+# Requires: the reproducible sm86 image (ghcr.io/ciprianveg/3090-vllm:dsv4-flash-vision-sm86)
 # and the model weights locally (see README).
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -13,8 +13,10 @@ MODEL_PATH="${MODEL_PATH:-/mnt/data7tb/models/DeepSeek-V4-Flash-Vision-Exp}"
 IMAGE="${IMAGE:-ghcr.io/ciprianveg/3090-vllm:dsv4-flash-vision-sm86}"
 CONTAINER_NAME="vllm_dsv4_1m"
 PORT="${PORT:-8000}"
+# Set VLLM_API_KEY in your environment (or edit this default) to secure the API.
 API_KEY="${VLLM_API_KEY:-}"
-GPUS="${GPUS:-0,1,2,3,4,5,6,7,8,9}"
+# GPUs 8/9 are reserved for another model on this box; use the rest.
+GPUS="${GPUS:-0,1,2,3,4,5,6,7,10,11}"
 
 start() {
     echo "Starting $CONTAINER_NAME ..."
@@ -29,9 +31,13 @@ start() {
       --ulimit stack=67108864 \
       -v "${MODEL_PATH}:/models/DeepSeek-V4-Flash-Vision-Exp:ro" \
       -v "${SCRIPT_DIR}/patches/model.py:/usr/local/lib/python3.12/dist-packages/vllm/models/deepseek_v4/nvidia/model.py:ro" \
+      -v "${SCRIPT_DIR}/patches/model_runner.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu/model_runner.py:ro" \
       -v "${SCRIPT_DIR}/patches/scheduler.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/core/sched/scheduler.py:ro" \
       -v "${SCRIPT_DIR}/patches/dspark_speculator.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu/spec_decode/dspark/speculator.py:ro" \
-      -v "${SCRIPT_DIR}/patches/structured_output_init.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/structured_output/__init__.py:ro" \
+      -v "${SCRIPT_DIR}/patches/sched_output.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/core/sched/output.py:ro" \
+      -v "${SCRIPT_DIR}/patches/vision.py:/usr/local/lib/python3.12/dist-packages/vllm/models/deepseek_v4/common/vision.py:ro" \
+      -v "${SCRIPT_DIR}/patches/flashinfer_sparse.py:/usr/local/lib/python3.12/dist-packages/vllm/models/deepseek_v4/nvidia/flashinfer_sparse.py:ro" \
+      -v "${SCRIPT_DIR}/patches/block_table.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu/block_table.py:ro" \
       -e HF_HOME=/tmp/hf_cache \
       -e CUDA_DEVICE_ORDER=PCI_BUS_ID \
       -e VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0 \
@@ -51,14 +57,16 @@ start() {
         --served-model-name dsv4-flash-vision \
         --tensor-parallel-size 2 \
         --pipeline-parallel-size 5 \
-        --gpu-memory-utilization 0.955 \
-        --max-model-len 1000000 --kv-cache-memory 2147483648 \
-        --max-num-batched-tokens 1024 --limit-mm-per-prompt '{"image":0,"video":0}' \
+        --gpu-memory-utilization 0.95 \
+        --max-model-len 1000000 \
+        --kv-cache-memory 2147483648 \
+        --max-num-batched-tokens 2048 \
+        --limit-mm-per-prompt '{"video":0}' \
         --max-num-seqs 4 \
         --speculative-config '{"method":"dspark","num_speculative_tokens":3,"draft_sample_method":"probabilistic","enable_adaptive_verification":false}' \
         --kv-cache-dtype fp8_ds_mla \
         --disable-custom-all-reduce \
-        --compilation-config '{"cudagraph_mode":"PIECEWISE","cudagraph_capture_sizes":[1,2,4,8,12,16],"max_cudagraph_capture_size":16}' \
+        --compilation-config '{"cudagraph_mode":"PIECEWISE","cudagraph_capture_sizes":[1,2,4],"max_cudagraph_capture_size":4}' \
         --block-size 256 \
         --trust-remote-code \
         --tool-call-parser deepseek_v4 \

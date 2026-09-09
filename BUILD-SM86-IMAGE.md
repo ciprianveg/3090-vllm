@@ -8,7 +8,7 @@ PR #58 (`pr/vision-sm80`) with the two build-time fixes baked in
 output). It is compiled for Ampere (SM86). The remaining runtime patches in
 [`deepseek-v4-flash-vision/patches/`](deepseek-v4-flash-vision/patches/) are
 **not baked in** — they are bind-mounted at container start (see
-`start-dsv4-spec.sh`). This guide covers building and publishing the base image.
+`start-dsv4-1m.sh`). This guide covers building and publishing the base image.
 
 ## Prerequisites
 
@@ -62,6 +62,6 @@ docker push ghcr.io/<your-org>/3090-vllm:dsv4-flash-vision-sm86
 - **Runtime patches are separate.** The model-specific fixes (spec + vision,
   tool-call grammars, vision OOM, etc.) live in
   [`deepseek-v4-flash-vision/patches/`](deepseek-v4-flash-vision/patches/) and are
-  mounted by `start-dsv4-spec.sh`. Rebuilding the image does not change them.
+  mounted by `start-dsv4-1m.sh`. Rebuilding the image does not change them.
 - **No secrets in the image.** The image carries no model weights, API keys, or
   host-specific paths; those are supplied at runtime via `docker run`.
