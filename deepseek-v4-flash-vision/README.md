@@ -12,13 +12,12 @@ First documented run of this model on SM86 (RTX 3090) hardware.
 |---|---:|
 | Prefill (long-context, cold) | **~3,500 tok/s** (425K tokens in ~120s) |
 | Prefill (3 concurrent 470K requests) | 3,400 tok/s aggregate (~95% scaling) |
-| Decode, DSpark speculative (k=3) | **58–60 tok/s** warm, 2.4x vs no-spec (25 tok/s) |
+| Decode, DSpark speculative (k=3) | **60+ tok/s** warm (measured at a 240 W power cap; ~70+ expected uncapped) |
 | Decode, DSpark (TP4×PP3, 12 GPUs) | **120+ tok/s** — same image, 12-GPU config |
 | Spec acceptance (code/text) | 76–87%, mean 3.3–3.5 of 4 tokens/step |
 | Max context — no CPU offload | **1,000,000 tokens** (single request) |
 | Max context — 36 GB CPU offload | 500K x **2 concurrent** GPU-resident + ~4.16M tokens parked in RAM |
 | Vision (image input) | **Working with DSpark (k=3)** — see [Vision](#vision) below |
-| Vision decode (1 image) | ~40–44 tok/s |
 | Tool calls (OpenAI-compatible) | **Working** — see [the fixes](#the-fixes) below |
 
 ## Vision
@@ -50,7 +49,7 @@ is all you need (modify the env defaults at the top if your paths differ).
 - DSpark k=3 (`num_speculative_tokens: 3`), vision enabled
 - Aligned to the proven 2x5 baseline config (no `--enforce-eager`/`-O0`/offload)
 - **The working configuration**: spec + vision + tool calls together
-  (text ~32–55 tok/s, vision 1-image ~40–44 tok/s, 3-image ~44 tok/s)
+  (text ~60+ tok/s at 240 W cap, ~70+ uncapped)
 - **1M context is available for 2 users** via `start-dsv4-1m.sh` (no offload) —
   two ~450–500K requests share the 1.01M-token GPU KV pool
 
@@ -131,14 +130,11 @@ broken (see `SPEC_VISION_FIX.md`). With them, spec decode + tool calls + vision 
 - **3,500 tok/s prefill** is the long-context cold number (sparse attention skips
   most of the haystack on filler text). Real-world chunked prefill of a 425K
   context completes in ~2 minutes; prefix-cache hits make re-runs near-instant.
-- **58–60 tok/s decode** is the warm single-stream text number with DSpark
-  acceptance in the 80%+ range; first request after boot runs ~45 tok/s until
-  caches warm.
+- **60+ tok/s decode** is the warm single-stream text number with DSpark
+  acceptance in the 80%+ range (measured at a 240 W power cap; ~70+ expected
+  uncapped); first request after boot runs ~45 tok/s until caches warm.
 - **120+ tok/s** on the same image with **TP4×PP3 across all 12 GPUs** (vs the
   TP2×PP5 10-GPU config above).
-- **Vision decode** is ~40–44 tok/s (1 image) and ~44 tok/s (3 images in one
-  prompt) with DSpark k=3 — the text-only draft drafts the image-conditioned text
-  rows, which are in-distribution.
 - Decode throughput is memory-bandwidth-bound: aggregate stays ~60 tok/s whether
   1 or 4 users generate (each user gets 1/n of it). Two users is the sweet spot.
 - GPU 11 historically flaky on this box — the config pins `CUDA_VISIBLE_DEVICES=0-7,10,11`.
