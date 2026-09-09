@@ -99,6 +99,16 @@ the top if your paths differ).
 own runtime patches **and** launch-config mods on top. Everything below is what we
 changed beyond the stock upstream PR image.
 
+### Build-time fixes (baked into the image)
+
+Applied to the upstream PR #58 source **before** building (see
+`BUILD-SM86-IMAGE.md`). They are part of the image and do not need a runtime mount.
+
+| Fix | What it does |
+|---|---|
+| `patches/scheduler.py` (transition repair part) | Grants the missing bonus row for a request finishing chunked prefill, keeping KV accounting consistent (avoids the `assert num_scheduled_tokens >= num_logits` in the model runner) |
+| `patches/structured_output_init.py` | Backport of [vLLM PR #52452](https://github.com/vllm-project/vllm/pull/52452): validates accepted speculative blocks against the grammar bitmask before committing them to request history |
+
 ### Runtime patches (bind-mounted, in [`patches/`](patches/))
 
 All are bind-mounted at container start (`start-dsv4-1m.sh`); none are baked into
@@ -152,15 +162,19 @@ broken (see `SPEC_VISION_FIX.md`). With them, spec decode + tool calls + vision 
 ## Quickstart
 
 ```bash
-# weights
-huggingface-cli download deepseek-ai/DeepSeek-V4-Flash-Vision-Exp --local-dir /mnt/data7tb/models/DeepSeek-V4-Flash-Vision-Exp
+# 1. Pull the pre-built image (no compilation needed)
+docker pull ghcr.io/ciprianveg/3090-vllm:dsv4-flash-vision-sm86
 
-# run (set VLLM_API_KEY for a secured API)
+# 2. Download the model weights (185 GB)
+huggingface-cli download deepseek-ai/DeepSeek-V4-Flash-Vision-Exp \
+  --local-dir /mnt/data7tb/models/DeepSeek-V4-Flash-Vision-Exp
+
+# 3. Run (set VLLM_API_KEY for a secured API)
 export VLLM_API_KEY="<your-key>"
 ./start-dsv4-1m.sh start            # 1M ctx, no offload
 ./start-dsv4-4m-offload.sh start    # 4M ctx, RAM offload
 
-# manage
+# 4. Manage
 ./start-dsv4-1m.sh status | logs | stop | restart
 ```
 

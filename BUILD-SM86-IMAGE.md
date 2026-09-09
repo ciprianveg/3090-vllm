@@ -25,8 +25,11 @@ cd vllm-backport
 git fetch origin pull/58/head:pr58
 git checkout pr58
 
-# 2. Apply the two build-time fixes (transition repair + grammar bitmask) —
-#    see deepseek-v4-flash-vision/patches/scheduler.py and structured_output_init.py
+# 2. Apply the two build-time fixes to the source:
+#    - transition repair (the `num_new_tokens += self.num_sampled_tokens_per_step`
+#      hunk in vllm/v1/core/sched/scheduler.py)
+#    - grammar-bitmask validation (vllm/v1/structured_output/__init__.py)
+#    Both are provided in deepseek-v4-flash-vision/patches/.
 
 # 3. Build with the repo's Dockerfile, targeting Ampere (sm86)
 docker build \
