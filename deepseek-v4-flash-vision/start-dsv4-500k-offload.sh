@@ -15,7 +15,7 @@ MODEL_PATH="${MODEL_PATH:-/mnt/data7tb/models/DeepSeek-V4-Flash-Vision-Exp}"
 IMAGE="${IMAGE:-ghcr.io/ciprianveg/3090-vllm:dsv4-flash-vision-sm86}"
 CONTAINER_NAME="vllm_dsv4_500k_offload"
 PORT="${PORT:-8000}"
-API_KEY="${API_KEY:-1791128410062}"
+API_KEY="${VLLM_API_KEY:-}"
 GPUS="${GPUS:-0,1,2,3,4,5,6,7,8,9}"
 KV_OFFLOAD_GB="${KV_OFFLOAD_GB:-36}"   # pinned-RAM ceiling is ~4.2 GB/rank; keep <= 38
 

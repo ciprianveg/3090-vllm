@@ -594,6 +594,7 @@ class Scheduler(SchedulerInterface):
             # so KV accounting stays consistent.
             if (
                 request.spec_token_ids
+                and not request.has_encoder_inputs
                 and num_new_tokens == len(request.spec_token_ids)
                 and num_new_tokens > 0
                 and self.num_sampled_tokens_per_step > 0
@@ -668,13 +669,38 @@ class Scheduler(SchedulerInterface):
                 req_index += 1
                 continue
 
+            # Uniform-pad fix (mm x spec row crossing): mm riders decode
+            # with 1 row while text siblings decode with 1+k rows in the
+            # same step. The fork base batch-layout helpers assume uniform
+            # decode rows; the ragged span crosses rows across requests
+            # and the mm request EOS-tail leaks into the next text
+            # request verify path (the deterministic 2-token death).
+            # Pad mm decode steps to 1+k rows with -1 placeholder drafts
+            # (auto-rejected by the verify kernels; bonus = plain target
+            # sample), mirroring the stock pad_spec_decode mechanism.
+            _mm_decode_pad = (
+                request.has_encoder_inputs
+                and not request.is_prefill_chunk
+                and num_new_tokens == 1
+                and self.num_spec_tokens > 0
+            )
+            if _mm_decode_pad:
+                num_new_tokens = 1 + self.num_spec_tokens
+
             # Schedule newly needed KV blocks for the request.
             with record_function_or_nullcontext("schedule: allocate_slots"):
                 while True:
                     new_blocks = self.kv_cache_manager.allocate_slots(
                         request,
                         num_new_tokens,
-                        num_lookahead_tokens=self.num_lookahead_tokens,
+                        num_lookahead_tokens=(
+                            self.num_lookahead_tokens
+                            if (
+                                not request.has_encoder_inputs
+                                or _mm_decode_pad
+                            )
+                            else 0
+                        ),
                     )
 
                     if new_blocks is not None:
@@ -743,6 +769,15 @@ class Scheduler(SchedulerInterface):
             token_budget -= num_new_tokens
             input_budget -= num_new_tokens + draft_slots
             req_index += 1
+
+            if _mm_decode_pad:
+                # Placeholder drafts: the verify kernels auto-reject -1
+                # rows and the bonus resample falls back to a plain
+                # target sample, so mm requests still decode 1 real token
+                # per step with identical vision behavior.
+                scheduled_spec_decode_tokens[request.request_id] = [
+                    -1
+                ] * self.num_spec_tokens
 
             # Speculative decode related.
             if request.spec_token_ids:
@@ -981,6 +1016,7 @@ class Scheduler(SchedulerInterface):
                         (self.num_spec_tokens > 0 and self.dynamic_sd_lookup is None)
                         and self.num_sampled_tokens_per_step > 0
                         and num_new_tokens == 1
+                        and not request.has_encoder_inputs
                         and (scheduled_running_reqs and not prefill_scheduled)
                     ):
                         padded_num_tokens = 1 + self.num_spec_tokens
@@ -1095,7 +1131,11 @@ class Scheduler(SchedulerInterface):
                     num_new_tokens,
                     num_new_computed_tokens=num_new_local_computed_tokens,
                     new_computed_blocks=new_computed_blocks,
-                    num_lookahead_tokens=effective_lookahead_tokens,
+                    num_lookahead_tokens=(
+                        0
+                        if request.has_encoder_inputs
+                        else effective_lookahead_tokens
+                    ),
                     num_external_computed_tokens=num_external_computed_tokens,
                     delay_cache_blocks=load_kv_async,
                     num_encoder_tokens=num_encoder_tokens,
@@ -1343,6 +1383,12 @@ class Scheduler(SchedulerInterface):
             num_scheduled_tokens=num_scheduled_tokens,
             total_num_scheduled_tokens=total_num_scheduled_tokens,
             scheduled_spec_decode_tokens=scheduled_spec_decode_tokens,
+            scheduled_mm_req_ids={
+                req_id
+                for req_id in num_scheduled_tokens
+                if (req := self.requests.get(req_id)) is not None
+                and req.has_encoder_inputs
+            },
             scheduled_encoder_inputs=scheduled_encoder_inputs,
             scheduled_encoder_input_stats=scheduled_encoder_input_stats,
             num_common_prefix_blocks=num_common_prefix_blocks,
@@ -2372,6 +2418,12 @@ class Scheduler(SchedulerInterface):
                 continue
 
             # Add newly generated spec token ids to the request.
+            # Multimodal requests never speculate (acceptance-0 policy): the
+            # text-only DSpark draft's proposals over image context are
+            # out-of-distribution. Store nothing so nothing can attach.
+            if request.has_encoder_inputs:
+                request.spec_token_ids = []
+                continue
             if self.structured_output_manager.should_advance(request):
                 metadata = request.structured_output_request
                 spec_token_ids = metadata.grammar.validate_tokens(spec_token_ids)  # type: ignore[union-attr]
