@@ -55,9 +55,9 @@ docker push ghcr.io/<your-org>/3090-vllm:dsv4-flash-vision-sm86
 
 ## Notes
 
-- **Architecture matters.** The wheel is built for the target arch. An aarch64
-  (GB10 / DGX Spark) build cannot run on an x86_64 RTX 3090 box and vice-versa —
-  build on the matching platform.
+- **Architecture matters.** The wheel is built for the target arch. A non-x86_64
+  build (e.g. an arm64 server build) cannot run on an x86_64 RTX 3090 box and
+  vice-versa — build on the matching platform.
 - **Runtime patches are separate.** The model-specific fixes (spec + vision,
   tool-call grammars, vision OOM, etc.) live in
   [`deepseek-v4-flash-vision/patches/`](deepseek-v4-flash-vision/patches/) and are

@@ -2,8 +2,7 @@
 
 vLLM inference solutions for consumer **NVIDIA RTX 3090 (Ampere, SM86)** hardware.
 
-Companion repo to [gb10-vllm](https://github.com/ciprianveg/gb10-vllm) (DGX Spark / GB10 / SM121).
-Same idea: a per-machine vLLM stack with buildable images, deploy scripts, and the
+A per-machine vLLM stack with buildable images, deploy scripts, and the
 runtime patches that make frontier-class models actually run on the hardware.
 
 ## Models index
